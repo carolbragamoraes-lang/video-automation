@@ -21,18 +21,17 @@ FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 # (texto, duração em segundos, destaque?) — ver COPY.md
 COPY = [
-    ("JÁ TENTOU", 0.75, False), ("DE TUDO", 0.65, True),
-    ("E SÓ SE", 0.6, False), ("FRUSTROU?", 0.9, True),
-    ("ANTES DE", 0.55, False), ("GASTAR MAIS", 0.8, True),
-    ("COM O QUE", 0.55, False), ("NÃO FUNCIONA", 0.95, True),
-    ("OLHA ESSA", 0.6, False), ("RECEITA", 0.8, True),
-    ("DE COZINHA", 0.8, False), ("COM 4", 0.55, False),
-    ("INGREDIENTES", 0.95, True), ("QUE VOCÊ", 0.55, False),
-    ("JÁ TEM", 0.6, False), ("EM CASA", 0.8, True),
-    ("SIMPLES", 0.7, True), ("RÁPIDA", 0.7, True),
-    ("SEM SEGREDO", 0.95, False), ("O PASSO", 0.6, False),
-    ("A PASSO", 0.7, True), ("ESTÁ NO", 0.55, False),
-    ("LINK", 0.7, True), ("ABAIXO ↓", 1.4, True),
+    ("TRIED", 0.6, False), ("EVERYTHING", 0.8, True),
+    ("AND STILL", 0.6, False), ("DISAPPOINTED?", 1.0, True),
+    ("BEFORE YOU", 0.6, False), ("SPEND MORE", 0.8, True),
+    ("ON WHAT", 0.5, False), ("DOESN'T WORK", 0.95, True),
+    ("CHECK OUT", 0.6, False), ("THIS KITCHEN", 0.75, False),
+    ("RECIPE", 0.8, True), ("JUST 4", 0.6, False),
+    ("INGREDIENTS", 0.9, True), ("YOU ALREADY", 0.6, False),
+    ("HAVE AT HOME", 0.85, True), ("SIMPLE", 0.65, True),
+    ("QUICK", 0.6, True), ("NO SECRETS", 0.85, False),
+    ("WANT THE", 0.55, False), ("FULL STEPS?", 0.9, True),
+    ("COMMENT", 0.7, False), ('COMMENT "YES" ↓', 2.6, True),
 ]
 DUR = sum(d for _, d, _ in COPY)
 N = int(DUR * FPS)
@@ -89,8 +88,8 @@ def make_background():
                         fill=(250, 250, 246), outline=(46, 125, 96), width=5)
     f1 = ImageFont.truetype(FONT, 30)
     f2 = ImageFont.truetype(FONT, 20)
-    d.text((jx, jy - 30), "BICARBONATO", font=f1, fill=(46, 125, 96), anchor="mm")
-    d.text((jx, jy + 20), "de sódio • 500 g", font=f2, fill=(90, 90, 90), anchor="mm")
+    d.text((jx, jy - 30), "BAKING SODA", font=f1, fill=(46, 125, 96), anchor="mm")
+    d.text((jx, jy + 20), "sodium bicarbonate", font=f2, fill=(90, 90, 90), anchor="mm")
     return img
 
 
@@ -302,7 +301,7 @@ def draw_overlay(img, t):
     # barra de progresso (retenção)
     d.rectangle((0, 0, W * t / DUR, 10), fill=(255, 214, 0))
     # aviso de conteúdo informativo
-    d.text((W / 2, H - 36), "Conteúdo informativo. Não substitui orientação médica.",
+    d.text((W / 2, H - 36), "For informational purposes only. Not medical advice.",
            font=font(19), fill=(255, 255, 255), anchor="mm",
            stroke_width=3, stroke_fill=(0, 0, 0))
 
