@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mock Flow</title>
+<style>.hidden{display:none} body{font-family:sans-serif;width:1200px}</style></head><body>
+<!-- Mock simplificado da interface do Google Flow, só para testar flow_automation.js -->
+<div id="home"><h1>Flow</h1><button id="np"><span>add</span> New project</button></div>
+<div id="proj" class="hidden">
+  <button id="mode">Text to Video</button>
+  <div id="modeOpts" class="hidden" role="listbox">
+    <div role="option">Text to Video</div><div role="option">Frames to Video</div></div>
+  <button id="tune" aria-label="Settings"><span>tune</span></button>
+  <div id="panel" class="hidden">
+    <button id="ar">Aspect Ratio: Landscape (16:9)</button>
+    <div id="arOpts" class="hidden"><div role="option">Landscape (16:9)</div><div role="option">Portrait (9:16)</div></div>
+    <button id="model">Veo 2</button>
+    <div id="modelOpts" class="hidden"><div role="option">Veo 2</div><div role="option">Veo 3.1 - Fast</div><div role="option">Veo 3.1 - Quality</div></div>
+    <button id="out">Outputs per prompt: 4</button>
+    <div id="outOpts" class="hidden"><div role="option">1</div><div role="option">2</div><div role="option">4</div></div>
+  </div>
+  <textarea placeholder="Generate a video with text..." style="width:600px;height:80px"></textarea>
+  <button id="gen" aria-label="Generate" disabled><span>arrow_forward</span></button>
+  <ul id="queue"></ul>
+</div>
+<script>
+window.state={aspect:'16:9',model:'Veo 2',mode:'Text to Video',outputs:'4',jobs:[]};
+const $=s=>document.querySelector(s), show=(s,v=true)=>$(s).classList.toggle('hidden',!v);
+$('#np').onclick=()=>{show('#home',false);show('#proj')};
+$('#mode').onclick=()=>show('#modeOpts');
+document.querySelectorAll('#modeOpts [role=option]').forEach(o=>o.onclick=()=>{state.mode=o.innerText;$('#mode').innerText=o.innerText;show('#modeOpts',false)});
+$('#tune').onclick=()=>show('#panel', $('#panel').classList.contains('hidden'));
+$('#ar').onclick=()=>show('#arOpts');
+document.querySelectorAll('#arOpts [role=option]').forEach(o=>o.onclick=()=>{state.aspect=o.innerText.match(/\d+:\d+/)[0];$('#ar').innerText='Aspect Ratio: '+o.innerText;show('#arOpts',false)});
+$('#model').onclick=()=>show('#modelOpts');
+document.querySelectorAll('#modelOpts [role=option]').forEach(o=>o.onclick=()=>{state.model=o.innerText;$('#model').innerText=o.innerText;show('#modelOpts',false)});
+$('#out').onclick=()=>show('#outOpts');
+document.querySelectorAll('#outOpts [role=option]').forEach(o=>o.onclick=()=>{state.outputs=o.innerText;$('#out').innerText='Outputs per prompt: '+o.innerText;show('#outOpts',false)});
+const ta=$('textarea'); ta.addEventListener('input',()=>$('#gen').disabled=!ta.value.trim());
+$('#gen').onclick=()=>{state.jobs.push({prompt:ta.value,aspect:state.aspect,model:state.model,outputs:state.outputs});
+  const li=document.createElement('li');li.textContent='Generating... '+state.aspect;$('#queue').append(li);ta.value='';$('#gen').disabled=true;};
+</script></body></html>

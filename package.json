@@ -1,0 +1,11 @@
+{
+  "name": "video-automation",
+  "private": true,
+  "scripts": {
+    "flow": "node flow/flow_automation.js",
+    "flow:test": "node flow/test/test_mock.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "_comentario": "Padrões (regex, sem diferenciar maiúsculas) usados para achar botões pelo texto/aria-label. Se o Flow mudar a interface, ajuste aqui. Ícones do Material aparecem como texto (ex.: 'add New project'), então evite âncoras ^...$.",
+  "newProject": [
+    "new project",
+    "novo projeto",
+    "create project",
+    "criar projeto"
+  ],
+  "modeMenu": [
+    "text to video|frames to video|ingredients to video",
+    "texto para v[ií]deo|modo"
+  ],
+  "textToVideo": [
+    "text to video",
+    "texto para v[ií]deo"
+  ],
+  "modelMenu": [
+    "^\\s*veo\\b",
+    "model|modelo"
+  ],
+  "settings": [
+    "^settings$|settings|configura[cç][oõ]es|tune|ajustes"
+  ],
+  "aspectMenu": [
+    "aspect ratio|propor[cç][aã]o",
+    "landscape|paisagem|16:9"
+  ],
+  "aspect916": [
+    "9\\s*:\\s*16",
+    "portrait|retrato|vertical"
+  ],
+  "outputsMenu": [
+    "outputs per prompt|sa[ií]das por comando|resultados por comando"
+  ],
+  "promptBox": [
+    "textarea[placeholder]",
+    "textarea",
+    "[contenteditable='true'][role='textbox']",
+    "[contenteditable='true']"
+  ],
+  "generate": [
+    "\\b(generate|gerar)\\b",
+    "arrow_forward",
+    "\\b(create|criar|send|enviar)\\b"
+  ]
+}
