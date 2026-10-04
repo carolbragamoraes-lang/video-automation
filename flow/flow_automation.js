@@ -65,7 +65,23 @@ function parseArgs(argv) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...m) => console.log(`[flow ${new Date().toLocaleTimeString()}]`, ...m);
 
+// Regra de legendas (CLAUDE.md): nunca pedir "no text"/"no subtitles"; todo
+// take traz a narração exata como legenda embutida.
+function checkSubtitleRule(take) {
+  const all = `${take.prompt}\n${take.negative_prompt || ""}`;
+  const banned = all.match(/\bno\s+(on-?screen\s+)?(text|subtitles?|captions?)\b/i);
+  if (banned) throw new Error(`${take.id}: o prompt contém "${banned[0]}", proibido pela regra de legendas.`);
+  if (/\b(text|subtitles?|captions?)\b/i.test(take.negative_prompt || "")) {
+    throw new Error(`${take.id}: negative_prompt não pode excluir texto/legendas.`);
+  }
+  const fala = (take.prompt.match(/says:\s*"([^"]+)"/) || [])[1];
+  const legenda = (take.prompt.match(/subtitle overlay:\s*"([^"]+)"/) || [])[1];
+  if (!legenda) throw new Error(`${take.id}: falta a linha 'Centered lower-third modern bold subtitle overlay: "..."'.`);
+  if (fala && fala !== legenda) throw new Error(`${take.id}: a legenda não é idêntica à narração.`);
+}
+
 function buildPrompt(spec, take) {
+  checkSubtitleRule(take);
   // O Flow tem um único campo de texto: o negativo vai como instrução "Avoid:".
   let p = take.prompt.trim();
   if (take.negative_prompt) p += `\nAvoid: ${take.negative_prompt}.`;
