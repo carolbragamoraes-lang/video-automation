@@ -24,6 +24,11 @@
  *   --only T1,T3        gera só esses takes
  *   --no-generate       cola os prompts mas não clica em gerar
  *   --dry-run           só imprime o que seria feito, sem abrir navegador
+ *   --manual            usa a aba do Flow já aberta, onde você mesmo criou o
+ *                       projeto e escolheu 9:16/Veo 3.1; o script só cola e gera
+ *
+ * Em caso de erro, o script salva flow_screens/erro.png e flow_screens/erro_botoes.txt
+ * (lista de botões visíveis) para ajustar flow/selectors.json.
  *
  * A interface do Flow muda com frequência. Os textos/seletores procurados
  * ficam em flow/selectors.json e podem ser ajustados sem mexer no código.
@@ -44,6 +49,7 @@ function parseArgs(argv) {
     launch: null,
     only: null,
     takesFile: null,
+    manual: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -53,6 +59,7 @@ function parseArgs(argv) {
     else if (a === "--only") opts.only = argv[++i].split(",");
     else if (a === "--no-generate") opts.generate = false;
     else if (a === "--dry-run") opts.dryRun = true;
+    else if (a === "--manual") opts.manual = true;
     else if (!opts.takesFile) opts.takesFile = a;
     else throw new Error(`Argumento desconhecido: ${a}`);
   }
@@ -215,6 +222,26 @@ async function setOptional(page, openerPatterns, valuePatterns, what) {
   }
 }
 
+// Lista o texto/aria-label de tudo que é clicável na tela (para diagnóstico).
+async function dumpUi(page, file) {
+  const items = await page.evaluate(() => {
+    const out = [];
+    const nodes = document.querySelectorAll(
+      'button, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [role="radio"], [role="combobox"], [role="listbox"], a, select, textarea, [contenteditable="true"]'
+    );
+    for (const el of nodes) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const txt = (el.innerText || el.value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      const aria = el.getAttribute("aria-label") || "";
+      const ph = el.getAttribute("placeholder") || "";
+      out.push(`${el.tagName.toLowerCase()}${el.getAttribute("role") ? `[role=${el.getAttribute("role")}]` : ""} | texto="${txt}" | aria="${aria}"${ph ? ` | placeholder="${ph}"` : ""} | pos=${Math.round(r.x)},${Math.round(r.y)}`);
+    }
+    return out;
+  });
+  fs.writeFileSync(file, `URL: ${page.url()}\n` + items.join("\n") + "\n");
+}
+
 /* ---------- fluxo principal ---------- */
 
 async function main() {
@@ -242,33 +269,52 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   const shot = (page, name) => page.screenshot({ path: path.join(outDir, `${name}.png`) }).catch(() => {});
 
-  const page = await browser.newPage();
+  let page;
+  if (opts.manual) {
+    // usa a aba do Flow que você já deixou configurada
+    const pages = (await browser.pages()).filter((p) => p.url().includes("/tools/flow") || p.url().startsWith(opts.url));
+    page = pages.find((p) => /\/project/.test(p.url())) || pages[pages.length - 1];
+    if (!page) throw new Error("Modo --manual: abra o projeto do Flow numa aba desse Chrome e rode de novo.");
+    await page.bringToFront();
+    log(`usando a aba aberta: ${page.url()}`);
+  } else {
+    page = await browser.newPage();
+  }
   page.setDefaultTimeout(30000);
-  log(`abrindo ${opts.url}`);
-  await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(3000); // o Flow é uma SPA com conexões abertas: espera a UI montar
+  failPage = page;
+  failDir = outDir;
 
-  if (/accounts\.google\.com/.test(page.url())) {
-    throw new Error("O Flow pediu login. Faça login no Google nessa janela do Chrome e rode de novo.");
-  }
+  if (!opts.manual) {
+    log(`abrindo ${opts.url}`);
+    await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(3000); // o Flow é uma SPA com conexões abertas: espera a UI montar
 
-  // 1) novo projeto
-  await clickByText(page, SELECTORS.newProject, "Novo projeto");
-  await sleep(2500);
+    if (/accounts\.google\.com/.test(page.url())) {
+      throw new Error("O Flow pediu login. Faça login no Google nessa janela do Chrome e rode de novo.");
+    }
 
-  // 2) modo texto→vídeo, modelo, proporção 9:16, nº de saídas
-  await setOptional(page, SELECTORS.modeMenu, SELECTORS.textToVideo, "modo Text to Video");
-  await clickByText(page, SELECTORS.settings, "configurações", { optional: true, timeout: 4000 });
-  await sleep(600);
-  if (cfg.modelo) {
-    const modelRe = [cfg.modelo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")];
-    await setOptional(page, SELECTORS.modelMenu, modelRe, `modelo ${cfg.modelo}`);
+    // 1) novo projeto
+    await clickByText(page, SELECTORS.newProject, "Novo projeto");
+    await sleep(2500);
+    await dumpUi(page, path.join(outDir, "projeto_botoes.txt"));
+    await shot(page, "00_projeto");
+
+    // 2) modo texto→vídeo, modelo, proporção 9:16, nº de saídas
+    await setOptional(page, SELECTORS.modeMenu, SELECTORS.textToVideo, "modo Text to Video");
+    await clickByText(page, SELECTORS.settings, "configurações", { optional: true, timeout: 4000 });
+    await sleep(600);
+    await dumpUi(page, path.join(outDir, "config_botoes.txt"));
+    await shot(page, "00_config_aberta");
+    if (cfg.modelo) {
+      const modelRe = [cfg.modelo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")];
+      await setOptional(page, SELECTORS.modelMenu, modelRe, `modelo ${cfg.modelo}`);
+    }
+    await setAspect916(page);
+    if (cfg.saidas_por_prompt) {
+      await setOptional(page, SELECTORS.outputsMenu, [`^\\s*${cfg.saidas_por_prompt}\\s*$`], `${cfg.saidas_por_prompt} saída(s)`);
+    }
+    await shot(page, "00_config");
   }
-  await setAspect916(page);
-  if (cfg.saidas_por_prompt) {
-    await setOptional(page, SELECTORS.outputsMenu, [`^\\s*${cfg.saidas_por_prompt}\\s*$`], `${cfg.saidas_por_prompt} saída(s)`);
-  }
-  await shot(page, "00_config");
 
   // 3) para cada take: cola o prompt e dispara a geração
   for (const take of takes) {
@@ -290,7 +336,16 @@ async function main() {
   else browser.disconnect();
 }
 
-main().catch((err) => {
+let failPage = null;
+let failDir = null;
+
+main().catch(async (err) => {
   console.error(`[flow] ERRO: ${err.message}`);
+  if (failPage && failDir) {
+    await failPage.screenshot({ path: path.join(failDir, "erro.png") }).catch(() => {});
+    await dumpUi(failPage, path.join(failDir, "erro_botoes.txt")).catch(() => {});
+    console.error(`[flow] diagnóstico salvo em ${failDir}/erro.png e erro_botoes.txt`);
+    console.error("[flow] dica: configure 9:16 e Veo 3.1 à mão na aba do Flow e rode de novo com --manual");
+  }
   process.exit(1);
 });

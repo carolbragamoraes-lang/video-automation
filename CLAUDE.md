@@ -25,7 +25,9 @@ Sempre que um novo vídeo de referência for enviado para análise, siga estes p
    - O container da nuvem **não alcança** labs.google e não tem login Google.
      Nesse caso, gere os arquivos, faça commit e diga ao usuário para rodar o
      passo 4 no computador dele (instruções no topo de `flow/flow_automation.js`).
-   - Se a interface do Flow mudar, ajuste `flow/selectors.json`.
+   - Se a interface do Flow mudar, ajuste `flow/selectors.json` usando
+     `flow_screens/erro_botoes.txt` (lista de botões salva em caso de erro).
+   - Plano B: a usuária configura 9:16/Veo 3.1 à mão e roda com `--manual`.
 
 ## Regra de legendas no Flow
 
