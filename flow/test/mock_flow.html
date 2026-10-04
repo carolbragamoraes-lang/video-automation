@@ -1,38 +1,51 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Mock Flow</title>
-<style>.hidden{display:none} body{font-family:sans-serif;width:1200px}</style></head><body>
-<!-- Mock simplificado da interface do Google Flow, só para testar flow_automation.js -->
+<style>.hidden{display:none} body{font-family:sans-serif;width:1200px}
+.backdrop{position:fixed;inset:0;z-index:10} [role=listbox]{position:relative;z-index:11;background:#fff}</style></head><body>
+<!-- Mock simplificado da interface do Google Flow, só para testar flow_automation.js.
+     Reproduz armadilhas reais: menus com camada invisível por cima da tela,
+     seletor de modelo já mostrando "Veo 3.1", botão "Generate" fora da caixa de
+     prompt e projeto que demora a abrir. -->
+<nav><a href="#" id="decoy" onclick="state.decoy++;return false">Generate ideas</a></nav>
 <div id="home"><h1>Flow</h1><button id="np"><span>add</span> New project</button></div>
 <div id="proj" class="hidden">
-  <button id="mode">Text to Video</button>
+  <button id="mode" aria-haspopup="listbox">Text to Video</button>
   <div id="modeOpts" class="hidden" role="listbox">
     <div role="option">Text to Video</div><div role="option">Frames to Video</div></div>
   <button id="tune" aria-label="Settings"><span>tune</span></button>
   <div id="panel" class="hidden">
-    <button id="ar">Aspect Ratio: Landscape (16:9)</button>
-    <div id="arOpts" class="hidden"><div role="option">Landscape (16:9)</div><div role="option">Portrait (9:16)</div></div>
-    <button id="model">Veo 2</button>
-    <div id="modelOpts" class="hidden"><div role="option">Veo 2</div><div role="option">Veo 3.1 - Fast</div><div role="option">Veo 3.1 - Quality</div></div>
-    <button id="out">Outputs per prompt: 4</button>
-    <div id="outOpts" class="hidden"><div role="option">1</div><div role="option">2</div><div role="option">4</div></div>
+    <button id="ar" aria-haspopup="listbox">Aspect Ratio: Landscape (16:9)</button>
+    <div id="arOpts" class="hidden" role="listbox"><div role="option">Landscape (16:9)</div><div role="option">Portrait (9:16)</div></div>
+    <button id="model" aria-haspopup="listbox">Veo 3.1 - Fast</button>
+    <div id="modelOpts" class="hidden" role="listbox"><div role="option">Veo 2</div><div role="option">Veo 3.1 - Fast</div><div role="option">Veo 3.1 - Quality</div></div>
+    <button id="out" aria-haspopup="listbox">Outputs per prompt: 4</button>
+    <div id="outOpts" class="hidden" role="listbox"><div role="option">1</div><div role="option">2</div><div role="option">4</div></div>
   </div>
-  <textarea placeholder="Generate a video with text..." style="width:600px;height:80px"></textarea>
-  <button id="gen" aria-label="Generate" disabled><span>arrow_forward</span></button>
+  <div class="composer">
+    <textarea placeholder="Generate a video with text..." style="width:600px;height:80px"></textarea>
+    <button id="gen" aria-label="Create" disabled><span>arrow_forward</span></button>
+  </div>
   <ul id="queue"></ul>
 </div>
 <script>
-window.state={aspect:'16:9',model:'Veo 2',mode:'Text to Video',outputs:'4',jobs:[]};
+window.state={aspect:'16:9',model:'Veo 3.1 - Fast',mode:'Text to Video',outputs:'4',jobs:[],decoy:0,lostClicks:0};
 const $=s=>document.querySelector(s), show=(s,v=true)=>$(s).classList.toggle('hidden',!v);
-$('#np').onclick=()=>{show('#home',false);show('#proj')};
-$('#mode').onclick=()=>show('#modeOpts');
-document.querySelectorAll('#modeOpts [role=option]').forEach(o=>o.onclick=()=>{state.mode=o.innerText;$('#mode').innerText=o.innerText;show('#modeOpts',false)});
+// menu aberto = camada invisível cobrindo a tela; clicar nela só fecha o menu
+let backdrop=null;
+function openMenu(sel){closeMenu();show(sel);backdrop=document.createElement('div');backdrop.className='backdrop';
+  backdrop.onclick=()=>{state.lostClicks++;closeMenu()};document.body.append(backdrop);}
+function closeMenu(){document.querySelectorAll('[role=listbox]').forEach(l=>l.classList.add('hidden'));if(backdrop){backdrop.remove();backdrop=null}}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});
+$('#np').onclick=()=>{show('#home',false);setTimeout(()=>{history.pushState({},'','#/project/123');show('#proj')},2500)};
+$('#mode').onclick=()=>openMenu('#modeOpts');
+document.querySelectorAll('#modeOpts [role=option]').forEach(o=>o.onclick=()=>{state.mode=o.innerText;$('#mode').innerText=o.innerText;closeMenu()});
 $('#tune').onclick=()=>show('#panel', $('#panel').classList.contains('hidden'));
-$('#ar').onclick=()=>show('#arOpts');
-document.querySelectorAll('#arOpts [role=option]').forEach(o=>o.onclick=()=>{state.aspect=o.innerText.match(/\d+:\d+/)[0];$('#ar').innerText='Aspect Ratio: '+o.innerText;show('#arOpts',false)});
-$('#model').onclick=()=>show('#modelOpts');
-document.querySelectorAll('#modelOpts [role=option]').forEach(o=>o.onclick=()=>{state.model=o.innerText;$('#model').innerText=o.innerText;show('#modelOpts',false)});
-$('#out').onclick=()=>show('#outOpts');
-document.querySelectorAll('#outOpts [role=option]').forEach(o=>o.onclick=()=>{state.outputs=o.innerText;$('#out').innerText='Outputs per prompt: '+o.innerText;show('#outOpts',false)});
+$('#ar').onclick=()=>openMenu('#arOpts');
+document.querySelectorAll('#arOpts [role=option]').forEach(o=>o.onclick=()=>{state.aspect=o.innerText.match(/\d+:\d+/)[0];$('#ar').innerText='Aspect Ratio: '+o.innerText;closeMenu()});
+$('#model').onclick=()=>openMenu('#modelOpts');
+document.querySelectorAll('#modelOpts [role=option]').forEach(o=>o.onclick=()=>{state.model=o.innerText;$('#model').innerText=o.innerText;closeMenu()});
+$('#out').onclick=()=>openMenu('#outOpts');
+document.querySelectorAll('#outOpts [role=option]').forEach(o=>o.onclick=()=>{state.outputs=o.innerText;$('#out').innerText='Outputs per prompt: '+o.innerText;closeMenu()});
 const ta=$('textarea'); ta.addEventListener('input',()=>$('#gen').disabled=!ta.value.trim());
 $('#gen').onclick=()=>{state.jobs.push({prompt:ta.value,aspect:state.aspect,model:state.model,outputs:state.outputs});
-  const li=document.createElement('li');li.textContent='Generating... '+state.aspect;$('#queue').append(li);ta.value='';$('#gen').disabled=true;};
+  const li=document.createElement('li');li.textContent='Generating 0% '+state.aspect;$('#queue').append(li);ta.value='';$('#gen').disabled=true;};
 </script></body></html>

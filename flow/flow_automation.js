@@ -97,48 +97,84 @@ function buildPrompt(spec, take) {
 
 /* ---------- helpers que rodam dentro da página ---------- */
 
+const CLICKABLE =
+  'button, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="option"], [role="tab"], [role="radio"], a, li, mat-option';
+// Itens de menu/lista: usados para escolher um valor depois de abrir o menu.
+// Assim nunca clicamos de novo no botão que abre o menu (que só reabriria o dropdown).
+const OPTION =
+  '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="radio"], mat-option, li';
+
 // Procura um elemento clicável cujo texto, aria-label ou title bata com algum
 // dos padrões (regex, sem diferenciar maiúsculas). Retorna o handle ou null.
-async function findClickable(page, patterns, { scope = null } = {}) {
+//   options: só itens de menu/lista (ignora botões que abrem menus)
+//   near:    handle de um elemento; procura primeiro nos ancestrais dele
+//            (ex.: o botão de gerar que fica junto da caixa de prompt)
+async function findClickable(page, patterns, { options = false, near = null } = {}) {
   const handle = await page.evaluateHandle(
-    (patterns, scope) => {
+    (patterns, selector, options, near) => {
       const res = patterns.map((p) => new RegExp(p, "i"));
-      const root = scope ? document.querySelector(scope) || document : document;
-      const nodes = root.querySelectorAll(
-        'button, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [role="radio"], a, li, mat-option'
-      );
       const visible = (el) => {
         const r = el.getBoundingClientRect();
         const s = getComputedStyle(el);
         return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
       };
-      for (const re of res) {
-        for (const el of nodes) {
-          if (!visible(el) || el.disabled) continue;
-          const label = [el.innerText, el.getAttribute("aria-label"), el.getAttribute("title")]
-            .filter(Boolean)
-            .join(" ")
-            .trim();
-          if (label && re.test(label)) return el;
+      const usable = (el) =>
+        visible(el) &&
+        !el.disabled &&
+        el.getAttribute("aria-disabled") !== "true" &&
+        !(options && (el.hasAttribute("aria-haspopup") || el.hasAttribute("aria-expanded")));
+      const label = (el) =>
+        [el.innerText, el.getAttribute("aria-label"), el.getAttribute("title")].filter(Boolean).join(" ").trim();
+      const search = (root) => {
+        const nodes = [...root.querySelectorAll(selector)].filter((el) => el !== near && !el.contains(near));
+        for (const re of res) {
+          for (const el of nodes) {
+            if (!usable(el)) continue;
+            const l = label(el);
+            if (l && re.test(l)) return el;
+          }
+        }
+        return null;
+      };
+      if (near) {
+        // sobe a partir da caixa de prompt: o botão mais próximo dela vence
+        let anc = near.parentElement;
+        for (let i = 0; anc && i < 8; i++, anc = anc.parentElement) {
+          const el = search(anc);
+          if (el) return el;
         }
       }
-      return null;
+      return search(document);
     },
     patterns,
-    scope
+    options ? OPTION : CLICKABLE,
+    options,
+    near
   );
   const el = handle.asElement();
   if (!el) await handle.dispose();
   return el;
 }
 
-async function clickByText(page, patterns, what, { optional = false, timeout = 15000 } = {}) {
+// Clica de verdade (mouse) e, se outra camada estiver por cima do elemento,
+// cai para o clique via DOM.
+async function robustClick(page, el) {
+  await el.evaluate((e) => e.scrollIntoView({ block: "center" }));
+  const onTop = await el.evaluate((e) => {
+    const r = e.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return !!hit && (hit === e || e.contains(hit));
+  });
+  if (onTop) await el.click();
+  else await el.evaluate((e) => e.click());
+}
+
+async function clickByText(page, patterns, what, { optional = false, timeout = 15000, options = false, near = null } = {}) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeout) {
-    const el = await findClickable(page, patterns);
+    const el = await findClickable(page, patterns, { options, near });
     if (el) {
-      await el.evaluate((e) => e.scrollIntoView({ block: "center" }));
-      await el.click();
+      await robustClick(page, el);
       log(`clicou: ${what}`);
       return true;
     }
@@ -149,6 +185,24 @@ async function clickByText(page, patterns, what, { optional = false, timeout = 1
     return false;
   }
   throw new Error(`Não encontrei "${what}" (padrões: ${patterns.join(" | ")}). Ajuste flow/selectors.json.`);
+}
+
+// Fecha menus/dropdowns que tenham ficado abertos (eles cobrem a tela com uma
+// camada invisível e fazem os cliques seguintes caírem no vazio).
+async function closeMenus(page) {
+  for (let i = 0; i < 3; i++) {
+    const open = await page.evaluate(() =>
+      [...document.querySelectorAll('[role="listbox"], [role="menu"], .cdk-overlay-backdrop, [data-radix-popper-content-wrapper]')].some(
+        (el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== "none";
+        }
+      )
+    );
+    if (!open) return;
+    await page.keyboard.press("Escape").catch(() => {});
+    await sleep(300);
+  }
 }
 
 async function findPromptBox(page, timeout = 20000) {
@@ -169,9 +223,12 @@ async function findPromptBox(page, timeout = 20000) {
   throw new Error("Não encontrei a caixa de prompt do Flow. Ajuste 'promptBox' em flow/selectors.json.");
 }
 
+const boxText = (box) => box.evaluate((e) => (e.isContentEditable ? e.innerText : e.value) || "");
+const norm = (t) => t.replace(/\s+/g, " ").trim();
+
 async function pastePrompt(page, box, text) {
   await box.evaluate((e) => e.scrollIntoView({ block: "center" }));
-  await box.click();
+  await robustClick(page, box);
   const isEditable = await box.evaluate((e) => e.isContentEditable);
   if (isEditable) {
     // contenteditable: seleciona tudo e insere via execCommand (dispara os eventos do framework)
@@ -183,6 +240,7 @@ async function pastePrompt(page, box, text) {
   } else {
     // textarea/input: usa o setter nativo para o React/Angular perceberem a mudança
     await box.evaluate((e, text) => {
+      e.focus();
       const proto = e.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(proto, "value").set.call(e, text);
       e.dispatchEvent(new Event("input", { bubbles: true }));
@@ -192,34 +250,112 @@ async function pastePrompt(page, box, text) {
   // um caractere digitado "de verdade" garante que o botão de gerar habilite
   await page.keyboard.type(" ");
   await page.keyboard.press("Backspace");
+  // confere se o texto inteiro entrou (editores ricos às vezes cortam/ignoram)
+  if (norm(await boxText(box)) !== norm(text)) {
+    log("texto colado não confere; digitando o prompt pelo teclado");
+    await box.evaluate((e) => {
+      e.focus();
+      if (e.isContentEditable) document.execCommand("selectAll", false, null);
+      else e.select();
+    });
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type(text, { delay: 0 });
+  }
+  if (norm(await boxText(box)) !== norm(text)) {
+    throw new Error("O prompt não ficou completo na caixa de texto do Flow.");
+  }
+}
+
+// Sinais de que o Flow aceitou o pedido: caixa esvaziou/mudou, botão de gerar
+// desabilitou ou apareceu um novo card de progresso/vídeo.
+async function snapshotJobs(page) {
+  return page.evaluate(() => {
+    const re = /\b\d{1,3}\s*%|generating|gerando|queued|na fila|em andamento|preparing|preparando/i;
+    let n = document.querySelectorAll("video").length;
+    for (const el of document.querySelectorAll("body *")) {
+      if (el.children.length === 0 && re.test(el.textContent || "")) n++;
+    }
+    return n;
+  });
+}
+
+async function waitGenerationStarted(page, box, gen, prompt, jobsBefore, timeout) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) {
+    await sleep(500);
+    const stillThere = await box.evaluate((e) => e.isConnected).catch(() => false);
+    if (!stillThere) return "a caixa de prompt foi recriada";
+    if (norm(await boxText(box)) !== norm(prompt)) return "a caixa de prompt foi limpa";
+    if ((await snapshotJobs(page)) > jobsBefore) return "apareceu um novo item na fila";
+    const disabled = await gen
+      .evaluate((e) => !e.isConnected || e.disabled || e.getAttribute("aria-disabled") === "true")
+      .catch(() => true);
+    if (disabled) return "o botão de gerar ficou ocupado";
+  }
+  return null;
+}
+
+async function generate(page, box, prompt, takeId) {
+  const jobsBefore = await snapshotJobs(page);
+  // espera o botão de gerar (o mais próximo da caixa de prompt) ficar habilitado
+  const t0 = Date.now();
+  let gen = null;
+  while (!gen && Date.now() - t0 < 30000) {
+    gen = await findClickable(page, SELECTORS.generate, { near: box });
+    if (!gen) await sleep(500);
+  }
+  if (!gen) throw new Error(`${takeId}: botão de gerar não encontrado/habilitado. Ajuste 'generate' em flow/selectors.json.`);
+
+  await robustClick(page, gen);
+  log(`clicou: gerar ${takeId}`);
+  let ok = await waitGenerationStarted(page, box, gen, prompt, jobsBefore, 8000);
+  if (!ok) {
+    // plano B: clique via DOM e, por fim, Ctrl+Enter na caixa de prompt
+    log(`${takeId}: sem confirmação ainda, tentando de novo`);
+    await gen.evaluate((e) => e.click()).catch(() => {});
+    ok = await waitGenerationStarted(page, box, gen, prompt, jobsBefore, 6000);
+  }
+  if (!ok) {
+    await box.focus();
+    await page.keyboard.down("Control");
+    await page.keyboard.press("Enter");
+    await page.keyboard.up("Control");
+    ok = await waitGenerationStarted(page, box, gen, prompt, jobsBefore, 6000);
+  }
+  if (!ok) throw new Error(`${takeId}: cliquei em gerar mas o Flow não iniciou a geração.`);
+  log(`${takeId}: geração iniciada (${ok})`);
 }
 
 async function setAspect916(page) {
-  const pick = () => clickByText(page, SELECTORS.aspect916, "proporção 9:16", { optional: true, timeout: 3000 });
-  if (await pick()) return; // opção já visível
+  const pick = () =>
+    clickByText(page, SELECTORS.aspect916, "proporção 9:16", { optional: true, timeout: 3000, options: true });
   if (await clickByText(page, SELECTORS.aspectMenu, "seletor de proporção", { optional: true, timeout: 3000 })) {
     await sleep(400);
-    if (await pick()) return;
+    if (await pick()) return closeMenus(page);
+    await closeMenus(page);
+  } else if (await pick()) {
+    return closeMenus(page); // opções já visíveis (ex.: grupo de botões)
   }
   // painel de configurações fechado: abre e tenta de novo
   if (await clickByText(page, SELECTORS.settings, "configurações", { optional: true, timeout: 3000 })) {
     await sleep(600);
-    if (await pick()) return;
     if (await clickByText(page, SELECTORS.aspectMenu, "seletor de proporção", { optional: true, timeout: 3000 })) {
       await sleep(400);
-      if (await pick()) return;
     }
+    if (await pick()) return closeMenus(page);
   }
   throw new Error("Não consegui selecionar 9:16. Selecione manualmente ou ajuste 'aspect916'/'aspectMenu' em flow/selectors.json.");
 }
 
+// Abre o menu e escolhe o valor entre os itens da lista. Nunca deixa menu aberto.
 async function setOptional(page, openerPatterns, valuePatterns, what) {
-  if (await clickByText(page, valuePatterns, what, { optional: true, timeout: 1500 })) return;
   if (await clickByText(page, openerPatterns, `menu ${what}`, { optional: true, timeout: 2500 })) {
     await sleep(400);
-    await clickByText(page, valuePatterns, what, { optional: true, timeout: 3000 });
-    await page.keyboard.press("Escape").catch(() => {});
+    await clickByText(page, valuePatterns, what, { optional: true, timeout: 3000, options: true });
+  } else {
+    await clickByText(page, valuePatterns, what, { optional: true, timeout: 1500, options: true });
   }
+  await closeMenus(page);
 }
 
 // Lista o texto/aria-label de tudo que é clicável na tela (para diagnóstico).
@@ -263,7 +399,12 @@ async function main() {
   const puppeteer = require("puppeteer-core");
   const browser = opts.launch
     ? await puppeteer.launch({ executablePath: opts.launch, headless: true, args: ["--no-sandbox"] })
-    : await puppeteer.connect({ browserURL: opts.browserUrl, defaultViewport: null });
+    : await puppeteer.connect({ browserURL: opts.browserUrl, defaultViewport: null }).catch((e) => {
+        throw new Error(
+          `Não consegui conectar ao Chrome em ${opts.browserUrl} (${e.message}). Abra o Chrome com ` +
+            `--remote-debugging-port=9222 --user-data-dir=<pasta> (veja o topo deste arquivo) e rode de novo.`
+        );
+      });
 
   const outDir = path.join(path.dirname(path.resolve(opts.takesFile)), "flow_screens");
   fs.mkdirSync(outDir, { recursive: true });
@@ -295,13 +436,16 @@ async function main() {
 
     // 1) novo projeto
     await clickByText(page, SELECTORS.newProject, "Novo projeto");
-    await sleep(2500);
+    await findPromptBox(page, 60000); // espera o projeto abrir (a caixa de prompt aparece)
+    await sleep(1500);
     await dumpUi(page, path.join(outDir, "projeto_botoes.txt"));
     await shot(page, "00_projeto");
 
     // 2) modo texto→vídeo, modelo, proporção 9:16, nº de saídas
     await setOptional(page, SELECTORS.modeMenu, SELECTORS.textToVideo, "modo Text to Video");
-    await clickByText(page, SELECTORS.settings, "configurações", { optional: true, timeout: 4000 });
+    if (!(await findClickable(page, SELECTORS.aspectMenu))) {
+      await clickByText(page, SELECTORS.settings, "configurações", { optional: true, timeout: 4000 });
+    }
     await sleep(600);
     await dumpUi(page, path.join(outDir, "config_botoes.txt"));
     await shot(page, "00_config_aberta");
@@ -313,24 +457,28 @@ async function main() {
     if (cfg.saidas_por_prompt) {
       await setOptional(page, SELECTORS.outputsMenu, [`^\\s*${cfg.saidas_por_prompt}\\s*$`], `${cfg.saidas_por_prompt} saída(s)`);
     }
+    await closeMenus(page);
     await shot(page, "00_config");
   }
 
   // 3) para cada take: cola o prompt e dispara a geração
+  const iniciados = [];
   for (const take of takes) {
     const prompt = buildPrompt(spec, take);
+    await closeMenus(page);
     const box = await findPromptBox(page);
     await pastePrompt(page, box, prompt);
-    log(`${take.id}: prompt colado (${prompt.length} caracteres)`);
+    log(`${take.id}: prompt colado (${prompt.length} caracteres, legenda: "${take.legenda}")`);
     await shot(page, `${take.id}_prompt`);
     if (opts.generate) {
-      await clickByText(page, SELECTORS.generate, `gerar ${take.id}`, { timeout: 10000 });
-      log(`${take.id}: geração iniciada`);
-      await sleep(4000); // deixa o Flow enfileirar antes do próximo prompt
+      await generate(page, box, prompt, take.id);
+      iniciados.push(take.id);
+      await sleep(3000); // deixa o Flow enfileirar antes do próximo prompt
       await shot(page, `${take.id}_gerando`);
     }
   }
 
+  if (opts.generate) log(`${iniciados.length}/${takes.length} takes em geração: ${iniciados.join(", ")}`);
   log(`pronto. Prints em ${outDir}. As cenas continuam gerando no Flow (acompanhe na aba aberta).`);
   if (opts.launch) await browser.close();
   else browser.disconnect();

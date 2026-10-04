@@ -31,6 +31,9 @@ const spec = JSON.parse(fs.readFileSync(takesFile, "utf8"));
       if (j.outputs !== String(spec.config_flow.saidas_por_prompt)) fail(`saídas ${j.outputs}`);
     });
     if (state.mode !== "Text to Video") fail(`modo ${state.mode}`);
+    if (state.decoy) fail(`clicou ${state.decoy}x no botão "Generate" errado (fora da caixa de prompt)`);
+    if (state.lostClicks) fail(`${state.lostClicks} clique(s) caíram na camada de um menu deixado aberto`);
+    if (!/#\/project\//.test(page.url())) fail(`não entrou no projeto (${page.url()})`);
     if (!process.exitCode) console.log(`OK: ${state.jobs.length} takes enviados em 9:16 (${state.jobs[0].model}, ${state.jobs[0].outputs} saídas)`);
   } finally {
     await browser.close();
